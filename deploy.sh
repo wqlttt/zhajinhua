@@ -159,7 +159,7 @@ fi
 step "连接服务器"
 setup_auth
 rsh true || die "无法连接 $SERVER_USER@$SERVER_HOST:$SERVER_PORT"
-ok "已连接 $SERVER_HOST（$AUTH 认证）"
+ok "已连接 ${SERVER_HOST}（${AUTH} 认证）"
 
 # 记录当前线上版本，供回滚使用
 step "备份当前版本"
@@ -179,6 +179,7 @@ step "上传文件"
 rsh "mkdir -p '$SERVER_DIR' && chmod -R u+w '$SERVER_DIR'" >/dev/null
 "${SCP_CMD[@]}" -q "${FILES[@]}" "$SERVER_USER@$SERVER_HOST:$SERVER_DIR/" \
   || die "上传失败"
+ok "已上传 ${#FILES[@]} 个文件"
 
 # 逐个比对校验和，确认传完整了
 step "校验完整性"
@@ -196,11 +197,15 @@ else
 fi
 
 step "安装依赖"
-# package-lock.json 变了才跑 npm ci，省时间
+# 按 package-lock.json 的内容哈希判断，而不是时间戳——
+# scp 每次都会刷新 mtime，用时间戳会导致每次都重装
 DEPS=$(rsh "
   cd '$SERVER_DIR'
-  if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then
+  SUM=\$(md5sum package-lock.json | cut -d' ' -f1)
+  if [ ! -d node_modules ] || [ \"\$(cat .lock-sum 2>/dev/null)\" != \"\$SUM\" ]; then
     npm ci --omit=dev 2>&1 | tail -2
+    chmod u+w . 2>/dev/null || true
+    echo \"\$SUM\" > .lock-sum
     echo 'INSTALLED'
   else
     echo 'SKIPPED'
@@ -256,7 +261,8 @@ fi
 # 跑一局真实对局，确认不是只有 HTTP 活着
 if [[ -f test-client.js ]]; then
   WS_URL="ws://${SERVER_HOST}:8080"
-  if URL="$WS_URL" ROOM=9527 timeout 40 node test-client.js > /tmp/jh_e2e.log 2>&1; then
+  # test-client.js 自带 30 秒兜底退出，macOS 没有 timeout 命令所以不外加
+  if URL="$WS_URL" ROOM=9527 node test-client.js > /tmp/jh_e2e.log 2>&1; then
     ok "线上对局验证通过"
   else
     warn "线上对局验证未通过，日志：/tmp/jh_e2e.log"
