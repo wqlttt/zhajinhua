@@ -13,6 +13,9 @@ const TABLE_OPTS = {
   ante: Number(process.env.ANTE) || 10,
   startChips: Number(process.env.START_CHIPS) || 1000,
   maxSeats: Number(process.env.MAX_SEATS) || 6,
+  // 不设则由 Table 按起始筹码的一半自动取
+  capBet: Number(process.env.CAP_BET) || 0,
+  maxRound: Number(process.env.MAX_ROUND) || 0,
 };
 
 // 房号规则：4 位数字。房间不存在就自动创建，空置一段时间后回收。

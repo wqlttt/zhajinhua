@@ -1083,16 +1083,22 @@ function renderActions() {
   if (s.myCallCost > 0 && me.chips < s.myCallCost) call.textContent = '全下跟';
   row.appendChild(call);
 
-  // 加注：服务端给出的区间无效时不显示
+  // 加注：区间有效才显示滑条；筹码不够最小加注时退化成全下
   if (s.myMinRaise > 0 && s.myMaxRaise >= s.myMinRaise) {
     const raise = mk('加注', 'ghost');
     raise.onclick = () => openRaise();
     row.appendChild(raise);
+  } else if (me.chips > s.myCallCost && s.myCallCost > 0) {
+    // 加不动、但筹码多于跟注额：给个全下出口，否则这手只能原价跟或弃。
+    // 筹码少于跟注额时「跟」本身已退化成全下，不再重复给按钮。
+    const allin = mk('全下', 'ghost');
+    allin.onclick = () => send({ type: 'action', action: 'allin' });
+    row.appendChild(allin);
   }
 
-  // 比牌（需先看牌，且场上还有对手）
+  // 比牌（需先看牌、付得起、且场上还有对手）
   const others = s.players.filter((p) => p && p.inHand && !p.folded && p.seat !== s.mySeat);
-  if (others.length > 0) {
+  if (others.length > 0 && me.chips >= s.myCompareCost) {
     // 多人时此键只打开选人弹窗，不直接发动作，所以不上锁
     const cmp = mk('比牌', 'ghost', others.length === 1);
     cmp.onclick = () => {
@@ -1135,10 +1141,27 @@ function openRaise() {
 
   range.min = min;
   range.max = max;
-  range.step = rules.ante;
+  // step 用底注，但上限常受筹码限制而不是底注整数倍。
+  // 用 1 作步进再在 oninput 里对齐，保证末端能精确拖到 max。
+  range.step = 1;
   range.value = min;
+  raiseBounds = { min, max };
   updateRaiseLabel(min);
   box.classList.add('on');
+}
+
+// 当前加注区间，用于把滑条值对齐到底注整数倍
+let raiseBounds = { min: 0, max: 0 };
+
+// 滑条值对齐到底注整数倍，但两端必须能精确取到：
+// 下限是服务端的最小加注，上限受筹码限制，二者都常不是底注整数倍。
+function snapRaise(raw) {
+  const { min, max } = raiseBounds;
+  const v = Math.max(min, Math.min(max, Math.round(Number(raw) || min)));
+  if (v - min < rules.ante) return min;  // 贴近起点吸到下限
+  if (max - v < rules.ante) return max;  // 贴近末端吸到上限
+  const snapped = Math.round(v / rules.ante) * rules.ante;
+  return Math.max(min, Math.min(max, snapped));
 }
 
 // 滑条旁边直接显示这一手要掏多少钱，闷牌减半在这里体现
@@ -1150,11 +1173,11 @@ function updateRaiseLabel(next) {
   $('raiseVal').innerHTML = `${next}<span style="font-size:11px;opacity:.75"> 付${cost}</span>`;
 }
 
-$('raiseRange').oninput = (e) => updateRaiseLabel(Number(e.target.value));
+$('raiseRange').oninput = (e) => updateRaiseLabel(snapRaise(e.target.value));
 $('btnRaiseOk').onclick = () => {
   if (actionLock) return;
   actionLock = true;
-  send({ type: 'action', action: 'raise', payload: { amount: Number($('raiseRange').value) } });
+  send({ type: 'action', action: 'raise', payload: { amount: snapRaise($('raiseRange').value) } });
   $('raiseBox').classList.remove('on');
 };
 

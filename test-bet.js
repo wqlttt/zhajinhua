@@ -136,7 +136,7 @@ console.log('\n=== 场景5：最小/最大加注边界 ===');
   t.action(p.sessionId, 'look');
 
   console.log(`  baseBet=${t.baseBet} minRaise=${t.minRaise()} maxRaise=${t.maxRaiseFor(p)}`);
-  chk(t.minRaise() === 20, 'baseBet=10 时最小加注到 20（翻倍）', `实际 ${t.minRaise()}`);
+  chk(t.minRaise() === 20, 'baseBet=10 时最小加注到 20（+一个底注）', `实际 ${t.minRaise()}`);
 
   let r = t.action(p.sessionId, 'raise', { amount: 15 });
   chk(!r.ok, '低于最小加注被拒', JSON.stringify(r));
@@ -182,6 +182,67 @@ console.log('\n=== 场景6：比牌成本 = 补差价 + 一倍单注 ===');
   } else {
     console.log('  (当前行动者已看牌，跳过闷牌比牌检查)');
   }
+  t.clearTimer();
+}
+
+console.log('\n=== 场景7：连续加注后仍有加注空间（用户报的「加不了」）===');
+{
+  // 旧实现 minRaise 用翻倍 + capBet 固定 320，加两次就撞顶导致加注按钮消失
+  const t = mkTable({ ante: 10 });
+  ['a', 'b', 'c'].forEach((s, i) => t.join(s, 'ABC'[i]));
+  t.startHand();
+  console.log(`  capBet 自动取值 = ${t.rules.capBet}`);
+
+  let steps = 0;
+  const history = [];
+  for (let i = 0; i < 8 && t.phase === 'playing'; i++) {
+    const cur = t.players[t.turn];
+    if (!cur) break;
+    if (!cur.looked) t.action(cur.sessionId, 'look');
+    const min = t.minRaise();
+    const max = t.maxRaiseFor(cur);
+    if (max < min) { history.push(`${cur.name} 无法加注(min=${min}>max=${max})`); break; }
+    const r = t.action(cur.sessionId, 'raise', { amount: min });
+    if (!r.ok) { history.push(`${cur.name} 加注被拒: ${r.error}`); break; }
+    history.push(`${cur.name}->${t.baseBet}`);
+    steps++;
+  }
+  console.log(`  连续加注链: ${history.join(' | ')}`);
+  chk(steps >= 5, '至少能连续加注 5 次（旧实现 2 次就卡死）', `实际 ${steps} 次`);
+
+  // A 加注到 100 后，下一家必须仍能加注
+  const t2 = mkTable({ ante: 10 });
+  ['a', 'b'].forEach((s, i) => t2.join(s, 'AB'[i]));
+  t2.startHand();
+  const A = t2.players[t2.turn];
+  t2.action(A.sessionId, 'look');
+  t2.action(A.sessionId, 'raise', { amount: 100 });
+  const B = t2.players[t2.turn];
+  const canRaise = t2.minRaise() <= t2.maxRaiseFor(B);
+  console.log(`  A加到100后 B: min=${t2.minRaise()} max=${t2.maxRaiseFor(B)} 跟注需${t2.callCost(B)}`);
+  chk(canRaise, 'A 加注到 100 后，B 仍能加注');
+  const rB = t2.action(B.sessionId, 'raise', { amount: t2.minRaise() });
+  chk(rB.ok, 'B 按最小幅度加注成功', JSON.stringify(rB));
+  t.clearTimer(); t2.clearTimer();
+}
+
+console.log('\n=== 场景8：筹码不足最小加注时可全下 ===');
+{
+  const t = mkTable({ ante: 10 });
+  ['a', 'b'].forEach((s, i) => t.join(s, 'AB'[i]));
+  t.startHand();
+  const A = t.players[t.turn];
+  t.action(A.sessionId, 'look');
+  t.action(A.sessionId, 'raise', { amount: 100 });
+
+  const B = t.players[t.turn];
+  B.chips = 30;
+  B.looked = true;
+  console.log(`  B 筹码30 baseBet=${t.baseBet} min=${t.minRaise()} max=${t.maxRaiseFor(B)}`);
+  chk(t.maxRaiseFor(B) < t.minRaise(), 'B 确实加不动（界面会给全下按钮）');
+  const r = t.action(B.sessionId, 'allin');
+  console.log(`  B 全下 -> ${r.ok ? 'ok' : r.error} allin=${B.allin} chips=${B.chips}`);
+  chk(r.ok && B.allin && B.chips === 0, '全下可用，筹码清零');
   t.clearTimer();
 }
 

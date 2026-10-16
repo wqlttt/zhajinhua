@@ -11,7 +11,7 @@ function randomInt(max) {
 const DEFAULTS = {
   ante: 10,          // 底注
   maxRound: 4,       // 封顶轮数，到了强制开牌
-  capBet: 320,       // 单注上限（明注口径）
+  capBet: 0,         // 单注上限（明注口径）；0 表示按 startChips 的一半自动取
   startChips: 1000,  // 初始筹码
   maxSeats: 6,
   minPlayers: 2,
@@ -31,6 +31,17 @@ const PHASE = {
 class Table {
   constructor(opts = {}) {
     this.rules = { ...DEFAULTS, ...opts };
+    // capBet 没显式给值时按起始筹码的一半取，保证加注有足够空间
+    if (!this.rules.capBet || this.rules.capBet <= 0) {
+      this.rules.capBet = Math.max(
+        this.rules.ante * 10,
+        Math.floor(this.rules.startChips / 2)
+      );
+    }
+    // 0 或负数视为「未配置」，回落到默认，避免第一轮就强制开牌
+    if (!this.rules.maxRound || this.rules.maxRound <= 0) {
+      this.rules.maxRound = DEFAULTS.maxRound;
+    }
     this.players = [];      // 座位数组，空位为 null
     this.players.length = this.rules.maxSeats;
     this.players.fill(null);
@@ -248,12 +259,10 @@ class Table {
     return this.costFor(player, owed + this.baseBet);
   }
 
-  // 最小加注：当前单注翻倍或加一个底注，取较大者，并受上限约束
+  // 最小加注：在当前单注上加一个底注。
+  // 不用「翻倍」——那样在上限不高时加两次就撞顶，加注选项会消失。
   minRaise() {
-    return Math.min(
-      this.rules.capBet,
-      Math.max(this.baseBet + this.rules.ante, this.baseBet * 2)
-    );
+    return Math.min(this.rules.capBet, this.baseBet + this.rules.ante);
   }
 
   // 该玩家付得起的最高加注额（明注口径），客户端滑条用同一套公式
