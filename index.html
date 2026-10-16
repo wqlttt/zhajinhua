@@ -415,6 +415,87 @@ body{
   opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;
 }
 .toast.on{opacity:1}
+
+/* ---------- 聊天 ---------- */
+/* 气泡浮在发送者座位旁，几秒后淡出，不占牌桌空间 */
+.bubble{
+  position:relative;
+  /* 够宽才不会把长消息挤成竖条，最多 4 行后省略 */
+  width:max-content;max-width:min(180px,46vw);
+  background:linear-gradient(180deg,#fffdf4,#f0e7d2);
+  color:#2a2317;font-size:12px;line-height:1.45;font-weight:500;
+  padding:6px 10px;border-radius:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,.45);
+  word-break:break-word;pointer-events:none;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;
+  overflow:hidden;
+}
+/* 小尾巴指向座位。line-clamp 用了 -webkit-box，
+   伪元素会被当成 flex 子项，所以尾巴做成外层包装的子元素 */
+.bubble-wrap{
+  position:absolute;z-index:15;transform:translate(-50%,-100%);
+  pointer-events:none;
+  animation:bubbleIn .22s cubic-bezier(.3,1.4,.6,1) backwards;
+}
+.bubble-wrap .tail{
+  position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-top:6px solid #f0e7d2;
+}
+.bubble.mine{
+  background:linear-gradient(180deg,#fff0c4,#f3d98a);
+}
+.bubble-wrap.mine .tail{border-top-color:#f3d98a}
+.bubble-wrap.fade{opacity:0;transition:opacity .5s}
+@keyframes bubbleIn{
+  from{opacity:0;transform:translate(-50%,-100%) scale(.7)}
+  to{opacity:1;transform:translate(-50%,-100%) scale(1)}
+}
+/* 顶部座位的气泡挂在座位下方，基准位移不同 */
+.bubble-wrap.below{transform:translate(-50%,0);animation-name:bubbleInBelow}
+@keyframes bubbleInBelow{
+  from{opacity:0;transform:translate(-50%,0) scale(.7)}
+  to{opacity:1;transform:translate(-50%,0) scale(1)}
+}
+
+/* 聊天入口按钮，放在操作栏右上 */
+.chat-btn{
+  position:absolute;right:10px;top:-34px;
+  width:30px;height:30px;border-radius:50%;border:1px solid var(--line);
+  background:rgba(0,0,0,.5);color:var(--gold);font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;z-index:12;
+}
+.chat-btn:active{transform:scale(.92)}
+
+/* 聊天面板 */
+.chatbox{
+  position:absolute;left:0;right:0;bottom:100%;
+  background:linear-gradient(180deg,rgba(4,26,18,.97),rgba(3,18,13,.99));
+  border-top:1px solid var(--line);
+  padding:10px 12px;display:none;z-index:14;
+}
+.chatbox.on{display:block}
+.quick{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.quick button{
+  border:1px solid var(--line);border-radius:14px;
+  background:rgba(255,255,255,.07);color:var(--txt);
+  font-size:12px;padding:6px 11px;cursor:pointer;
+}
+.quick button:active{background:rgba(245,196,81,.2)}
+.chat-input{display:flex;gap:6px}
+.chat-input input{
+  flex:1;min-width:0;padding:9px 11px;border-radius:9px;
+  border:1px solid var(--line);background:rgba(0,0,0,.4);
+  color:var(--txt);font-size:14px;outline:none;
+}
+.chat-input input:focus{border-color:var(--gold)}
+.chat-input button{
+  flex:0 0 52px;border:none;border-radius:9px;font-size:14px;font-weight:600;
+  background:linear-gradient(180deg,#f9d678,#cf9418);color:#3a2a05;cursor:pointer;
+}
+.chat-input button:active{transform:translateY(1px)}
 </style>
 </head>
 <body>
@@ -476,7 +557,15 @@ body{
       </div>
     </div>
 
-    <div class="actions">
+    <div class="actions" style="position:relative">
+      <div class="chat-btn" id="chatBtn">💬</div>
+      <div class="chatbox" id="chatBox">
+        <div class="quick" id="quickRow"></div>
+        <div class="chat-input">
+          <input id="chatInput" maxlength="60" placeholder="说点什么…" autocomplete="off">
+          <button id="chatSend">发送</button>
+        </div>
+      </div>
       <div class="timer-bar"><div class="timer-fill" id="timerFill" style="width:0"></div></div>
       <div class="cost-row">
         <span id="costInfo"></span>
@@ -592,7 +681,7 @@ function handle(msg, room, name) {
 
     case 'state':
       state = msg.state;
-      actionLock = false; // 服务端已确认上一个动作，解锁
+      setLock(false); // 服务端已确认上一个动作，解锁
       render();
       break;
 
@@ -605,7 +694,7 @@ function handle(msg, room, name) {
       break;
 
     case 'error':
-      actionLock = false; // 动作被拒，解锁让玩家重试
+      setLock(false); // 动作被拒，解锁让玩家重试
       toast(msg.error);
       if (state) renderActions();
       break;
@@ -618,6 +707,7 @@ function handle(msg, room, name) {
       break;
 
     case 'chat':
+      showBubble(msg.seat, msg.name, msg.text);
       break;
   }
 }
@@ -1085,7 +1175,9 @@ function renderActions() {
 
   // 加注：区间有效才显示滑条；筹码不够最小加注时退化成全下
   if (s.myMinRaise > 0 && s.myMaxRaise >= s.myMinRaise) {
-    const raise = mk('加注', 'ghost');
+    // 此键只打开滑条面板，不直接发动作，所以不能上锁
+    // （上锁会让后面的「确定」被 actionLock 拦掉，加注永远发不出去）
+    const raise = mk('加注', 'ghost', false);
     raise.onclick = () => openRaise();
     row.appendChild(raise);
   } else if (me.chips > s.myCallCost && s.myCallCost > 0) {
@@ -1102,8 +1194,8 @@ function renderActions() {
     // 多人时此键只打开选人弹窗，不直接发动作，所以不上锁
     const cmp = mk('比牌', 'ghost', others.length === 1);
     cmp.onclick = () => {
-      if (!me.looked) { actionLock = false; cmp.disabled = false; return toast('闷牌不能比牌，请先看牌'); }
-      if (me.chips < s.myCompareCost) { actionLock = false; cmp.disabled = false; return toast(`比牌需要 ${s.myCompareCost} 筹码`); }
+      if (!me.looked) { setLock(false); cmp.disabled = false; return toast('闷牌不能比牌，请先看牌'); }
+      if (me.chips < s.myCompareCost) { setLock(false); cmp.disabled = false; return toast(`比牌需要 ${s.myCompareCost} 筹码`); }
       if (others.length === 1) send({ type: 'action', action: 'compare', payload: { target: others[0].seat } });
       else openPick(others);
     };
@@ -1114,6 +1206,19 @@ function renderActions() {
 // 动作按钮点一次就锁住，等服务端下一个 state 回来再解锁，
 // 避免网络延迟时连点发出重复动作
 let actionLock = false;
+let lockTimer = null;
+
+function setLock(on) {
+  actionLock = on;
+  clearTimeout(lockTimer);
+  // 兜底：3 秒还没收到 state/error 就强制解锁，避免界面卡死点不动
+  if (on) {
+    lockTimer = setTimeout(() => {
+      actionLock = false;
+      if (state) renderActions();
+    }, 3000);
+  }
+}
 
 function mk(text, cls, lockOnClick) {
   const b = document.createElement('button');
@@ -1122,7 +1227,7 @@ function mk(text, cls, lockOnClick) {
   if (lockOnClick !== false) {
     b.addEventListener('click', (e) => {
       if (actionLock) { e.stopImmediatePropagation(); return; }
-      actionLock = true;
+      setLock(true);
       b.disabled = true;
     }, true);
   }
@@ -1176,9 +1281,11 @@ function updateRaiseLabel(next) {
 $('raiseRange').oninput = (e) => updateRaiseLabel(snapRaise(e.target.value));
 $('btnRaiseOk').onclick = () => {
   if (actionLock) return;
-  actionLock = true;
-  send({ type: 'action', action: 'raise', payload: { amount: snapRaise($('raiseRange').value) } });
   $('raiseBox').classList.remove('on');
+  // 先发送再上锁：send 失败时会自行解锁，避免顺序导致的死锁
+  if (sendOk({ type: 'action', action: 'raise', payload: { amount: snapRaise($('raiseRange').value) } })) {
+    setLock(true);
+  }
 };
 
 function openPick(others) {
@@ -1241,6 +1348,123 @@ function onEvent(ev) {
   }
 }
 
+/* ================= 聊天 ================= */
+
+// 常用短语，打牌时不方便打字
+const QUICK = [
+  '快点儿啊 等的黄花菜都凉了',
+  '快点吧',
+  '稳住',
+  '这把我赢了',
+  '不跟了',
+  '手气真差',
+  '让我想想',
+  '哈哈哈',
+];
+
+// 每个座位同时只显示一个气泡，新消息顶掉旧的
+const bubbles = new Map();
+
+function showBubble(seat, name, text) {
+  const felt = $('felt');
+  if (!felt || !state) return;
+
+  const old = bubbles.get(seat);
+  if (old) {
+    clearTimeout(old.fadeTimer);
+    clearTimeout(old.killTimer);
+    old.el.remove();
+  }
+
+  // 定位到该座位上方；找不到座位元素（例如观战者）就浮在桌心
+  const seatEl = felt.querySelector(`.seat[data-seat="${seat}"]`);
+  const mine = seat === state.mySeat;
+  const el = document.createElement('div');
+  el.className = 'bubble-wrap' + (mine ? ' mine' : '');
+
+  const body = document.createElement('div');
+  body.className = 'bubble' + (mine ? ' mine' : '');
+  body.textContent = text;
+  el.appendChild(body);
+
+  const tail = document.createElement('div');
+  tail.className = 'tail';
+  el.appendChild(tail);
+
+  if (seatEl) {
+    const fr = felt.getBoundingClientRect();
+    const sr = seatEl.getBoundingClientRect();
+    el.style.left = ((sr.left - fr.left + sr.width / 2) / fr.width * 100) + '%';
+    el.style.top = ((sr.top - fr.top - 4) / fr.height * 100) + '%';
+  } else {
+    el.style.left = '50%';
+    el.style.top = '30%';
+  }
+  felt.appendChild(el);
+
+  // 气泡居中挂在座位上方，靠边的座位可用宽度有限。
+  // 插入前就按中心点到两侧的距离算出宽度上限，避免依赖测量时机。
+  const fr = felt.getBoundingClientRect();
+  const pad = 8;
+  if (seatEl) {
+    const sr = seatEl.getBoundingClientRect();
+    const cx = sr.left - fr.left + sr.width / 2;
+    // 居中布局下，两侧各留 cx 和 (宽-cx)，取较小的一边决定半宽
+    const half = Math.max(50, Math.min(cx - pad, fr.width - cx - pad));
+    body.style.maxWidth = Math.floor(half * 2) + 'px';
+
+    // 顶部座位的气泡会顶出桌外，改成挂到座位下方，尾巴翻向上
+    if (sr.top - fr.top < 86) {
+      el.classList.add('below');
+      el.style.top = ((sr.bottom - fr.top + 4) / fr.height * 100) + '%';
+      tail.style.cssText = 'position:absolute;left:50%;top:-5px;transform:translateX(-50%);'
+        + 'border-left:6px solid transparent;border-right:6px solid transparent;'
+        + `border-bottom:6px solid ${mine ? '#fff0c4' : '#fffdf4'};`;
+    }
+  }
+
+  // 长消息多停一会儿，按字数给 3~6 秒
+  const hold = Math.min(6000, 2600 + text.length * 120);
+  const fadeTimer = setTimeout(() => el.classList.add('fade'), hold);
+  const killTimer = setTimeout(() => {
+    el.remove();
+    bubbles.delete(seat);
+  }, hold + 520);
+  bubbles.set(seat, { el, fadeTimer, killTimer });
+}
+
+function sendChat(text) {
+  const t = String(text || '').trim().slice(0, 60);
+  if (!t) return;
+  send({ type: 'chat', text: t });
+  $('chatBox').classList.remove('on');
+  $('chatInput').value = '';
+}
+
+// 渲染快捷短语按钮
+function initChat() {
+  const row = $('quickRow');
+  row.innerHTML = '';
+  for (const phrase of QUICK) {
+    const b = document.createElement('button');
+    b.textContent = phrase;
+    b.onclick = () => sendChat(phrase);
+    row.appendChild(b);
+  }
+}
+
+$('chatBtn').onclick = () => {
+  const box = $('chatBox');
+  box.classList.toggle('on');
+  if (box.classList.contains('on')) $('chatInput').focus();
+};
+$('chatSend').onclick = () => sendChat($('chatInput').value);
+$('chatInput').onkeydown = (e) => {
+  if (e.key === 'Enter') sendChat($('chatInput').value);
+  e.stopPropagation();
+};
+initChat();
+
 let toastTimer = null;
 function toast(text) {
   const t = $('toast');
@@ -1252,9 +1476,21 @@ function toast(text) {
 
 function flashTip(text) { toast(text); }
 
+// 返回是否真的发出去了，调用方据此决定要不要上锁
+function sendOk(obj) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(obj));
+    return true;
+  }
+  // 发不出去就必须解锁，否则等不到 state/error，整排按钮会一直禁用
+  setLock(false);
+  if (state) renderActions();
+  toast('连接已断开');
+  return false;
+}
+
 function send(obj) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
-  else toast('连接已断开');
+  sendOk(obj);
 }
 
 function esc(s) {

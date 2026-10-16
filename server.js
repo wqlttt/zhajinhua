@@ -126,6 +126,7 @@ wss.on('connection', (ws, req) => {
   ws.authed = false;
   ws.sessionId = null;
   ws.isAlive = true;
+  ws.lastChat = 0;
   ws.on('pong', () => { ws.isAlive = true; });
 
   // 简单限流：每个连接每秒最多 20 条消息
@@ -220,10 +221,17 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'chat': {
-        const text = String(msg.text || '').slice(0, 60).replace(/[\u0000-\u001f]/g, '');
+        const text = String(msg.text || '').trim().slice(0, 60).replace(/[\u0000-\u001f]/g, '');
         if (!text) break;
         const p = table.findBySession(ws.sessionId);
         if (!p) break;
+        // 聊天单独节流：1.2 秒一条，避免刷屏把牌桌糊住
+        const now = Date.now();
+        if (now - (ws.lastChat || 0) < 1200) {
+          send(ws, 'error', { error: '说话太快了' });
+          break;
+        }
+        ws.lastChat = now;
         for (const c of room.clients.values()) {
           send(c, 'chat', { seat: p.seat, name: p.name, text });
         }
