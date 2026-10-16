@@ -2,5 +2,9 @@ node_modules/
 *.log
 .DS_Store
 
-# 含服务器密码，绝不进仓库
+# 部署相关：只存本机，不进仓库
 .deploy.env
+.deploy.env.example
+deploy.sh
+rollback.sh
+DEPLOY.md

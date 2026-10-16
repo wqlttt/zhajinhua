@@ -77,41 +77,16 @@ PORT=8080 node server.js
 
 ## 部署
 
-### 一键部署
-
-首次使用先配置服务器信息：
-
-```bash
-cp .deploy.env.example .deploy.env
-chmod 600 .deploy.env     # 里面可能有密码
-# 编辑 .deploy.env 填上服务器地址
-```
-
-之后每次改完代码：
-
-```bash
-./deploy.sh "改了什么"     # 提交 + 推 GitHub + 部署 + 验证
-./deploy.sh -d             # 只部署，不动 git
-./deploy.sh -n "说明"      # 只提交推送，不部署
-./rollback.sh              # 出问题回退到上一个版本
-```
-
-`deploy.sh` 会依次做：语法检查 → 跑测试 → 提交推送 → 备份线上版本 → 上传 → 校验和比对 → 按需装依赖 → 重启 → 健康检查 + 真实开局验证。任一步失败就中止，不会留下半部署状态。
-
-推荐配 SSH 密钥免密（`ssh-copy-id root@服务器`），这样 `.deploy.env` 里不用写密码。写了密码则需要 `brew install sshpass`。
-
-### 首次手动部署
-
 ```bash
 # 上传代码到 /opt/jinhua 后
 npm ci --omit=dev
-cp jinhua.service /etc/systemd/system/
 useradd --system --no-create-home --shell /usr/sbin/nologin jinhua
+cp jinhua.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now jinhua
 journalctl -u jinhua -f    # 看日志
 ```
 
-`jinhua.service` 是 systemd unit，服务以非 root 的 `jinhua` 用户运行，内存上限 320M，崩溃自动重启。
+`jinhua.service` 是 systemd unit，服务以非 root 的 `jinhua` 用户运行，代码目录只读，内存上限 320M，崩溃自动重启。
 
 配置写在 `/etc/jinhua.env`（权限 600）：
 
