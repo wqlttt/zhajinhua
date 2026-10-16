@@ -1,0 +1,50 @@
+[Unit]
+Description=炸金花 游戏服务
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/jinhua
+ExecStart=/usr/bin/node /opt/jinhua/server.js
+# 密码等配置放在独立文件里，权限 600，不写进 unit 也不进 shell 历史
+EnvironmentFile=/etc/jinhua.env
+Restart=always
+RestartSec=3
+User=jinhua
+Group=jinhua
+
+# 日志走 journald，用 journalctl -u jinhua 查看
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jinhua
+
+# 加固：这个服务只需要读自己的代码目录和监听端口，其余一律收紧
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# 代码目录只读挂载，服务不需要写任何文件
+ReadOnlyPaths=/opt/jinhua
+
+# 资源上限，避免异常情况影响同机器上的其它服务
+MemoryMax=320M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

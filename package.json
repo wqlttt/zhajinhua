@@ -1,0 +1,15 @@
+{
+  "name": "jinhua",
+  "version": "1.0.0",
+  "description": "炸金花 - 多人联机",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
